@@ -1,0 +1,13 @@
+CompileFlags:
+  Add:
+    - "-I."
+    - "-I.."
+    - "-I../.."
+    - "-I/usr/include/libdrm"
+    - "-isystem"
+    - "/usr/include"
+    - "-std=c11"
+    - "-Wall"
+    - "-Wpedantic"
+    - "-Wextra"
+    - "-Wno-unused-function"
