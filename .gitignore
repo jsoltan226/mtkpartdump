@@ -1,0 +1,17 @@
+/obj/*
+/bin/*
+/Makefile.old
+/assets/tests/asset_load_test/*.png
+/tests/testlog.txt
+/tests/bin/*
+/.clangd
+\;
+\\
+log.txt
+test_log.txt
+log_test.txt
+tmp.c
+test.c
+tmp
+test
+vgcore.*
