@@ -16,13 +16,13 @@
 #define MTK_PART_EXT_MAGIC_BE 0x89168958
 
 #define MTK_PART_EXT_IMG_TYPE_LIST  \
-    X_(AP_BIN,      0xff000000)     \
-    X_(AP_BOOT_SIG, 0xff000001)     \
-    X_(MODEM_LTE,   0x00ff0000)     \
-    X_(MODEM_C2K,   0x00ff0001)     \
-    X_(CERT1,       0x0000ff00)     \
-    X_(CERT1_MODEM, 0x0000ff01)     \
-    X_(CERT2,       0x0000ff02)     \
+    X_(AP_BIN,      0x00000000)     \
+    X_(AP_BOOT_SIG, 0x00000001)     \
+    X_(MODEM_LTE,   0x01000000)     \
+    X_(MODEM_C2K,   0x01000001)     \
+    X_(CERT1,       0x02000000)     \
+    X_(CERT1_MODEM, 0x02000001)     \
+    X_(CERT2,       0x02000002)     \
 
 
 union mtk_partition_header {

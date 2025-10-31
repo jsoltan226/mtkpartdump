@@ -123,7 +123,7 @@ static void dump_part_header(struct mtk_partition_header_data *hdr)
     s_log_info("    .data = {");
     log_magic ("        .magic = ", hdr->magic);
     s_log_info("        .part_size = %#x,", hdr->part_size);
-    s_log_info("        .part_name = \"%32s\",", hdr->part_name);
+    s_log_info("        .part_name = \"%.32s\",", hdr->part_name);
     s_log_info("        .memory_address = %#x,", hdr->memory_address);
     s_log_info("        .memory_address_mode = %#x,", hdr->memory_address_mode);
     s_log_info("        .ext = {");
