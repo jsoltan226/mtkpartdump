@@ -107,15 +107,47 @@ static i32 parse_args(i32 argc, char **argv,
         *o_file_paths = vector_new(const char *);
 
     for (i32 i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help"))
-            *o_flags |= ARG_HELP;
-        else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--chain"))
-            *o_flags |= ARG_CHAIN;
-        else
+        if (argv[i][0] == '-') {
+            /* Some kind of an option */
+
+            if (argv[i][1] == '-') {
+                /* Long (`--`) option */
+                if (!strcmp(argv[i], "--help")) {
+                    *o_flags |= ARG_HELP;
+                } else if (!strcmp(argv[i], "--chain")) {
+                    *o_flags |= ARG_CHAIN;
+                } else {
+                    s_log_error("Unknown option \"%s\"", argv[i]);
+                    return 1;
+                }
+            } else if (argv[i][1] >= 'a' && argv[i][1] <= 'z') {
+                /* Short (`-`) option */
+                for (char *chr_p = &argv[i][1]; *chr_p != '\0'; chr_p++) {
+                    switch (*chr_p) {
+                    case 'h':
+                        *o_flags |= ARG_HELP;
+                        break;
+                    case 'c':
+                        *o_flags |= ARG_CHAIN;
+                        break;
+                    default:
+                        s_log_error("Unknown option \"-%c\"", *chr_p);
+                        return 1;
+                    }
+                }
+            }
+        } else {
+            /* Not an option, just a file argument */
             vector_push_back(o_file_paths, argv[i]);
+        }
     }
 
-    if (argc <= 1) {
+    /* If the argument count is too small or
+     * no file arguments were found (and `--help` wansn't supplied),
+     * error out */
+    if (argc <= 1 ||
+        (!(*o_flags & ARG_HELP) && vector_size(o_file_paths) == 0))
+    {
         s_log_error("Not enough arguments!");
         vector_destroy(o_file_paths);
         return 1;
