@@ -121,6 +121,8 @@ static i32 setup_log(void) {
 static void print_usage(void)
 {
     s_log_info("Usage: mtkpartdump [OPTIONS...] <FILE1> [FILE2 FILE3 ...]");
+    s_log_info("Inspect and extract MediaTek logical partitions "
+        "from firmware blobs");
 
     const char *old_line = NULL;
     s_configure_log_line(S_LOG_INFO, "%s", &old_line);

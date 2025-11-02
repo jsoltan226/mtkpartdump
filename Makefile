@@ -100,7 +100,7 @@ _entry_point_obj := $(OBJDIR)/entry-point.c.o
 _test_entry_point_obj := $(OBJDIR)/test-entry-point.c.o
 
 # Executables
-EXE := $(BINDIR)/$(EXEPREFIX)main$(EXESUFFIX)
+EXE := $(BINDIR)/$(EXEPREFIX)mtkpartdump$(EXESUFFIX)
 TEST_LIB := $(TEST_BINDIR)/$(SO_PREFIX)libmain_test$(SO_SUFFIX)
 TEST_LIB_OBJS := $(filter-out $(_main_obj) $(_entry_point_obj),$(OBJS))
 EXEARGS :=
