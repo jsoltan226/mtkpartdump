@@ -43,16 +43,16 @@ void mtkpart_dump_file(FILE *fp, u32 flags)
     bool chain = flags & ARG_FLAG_CHAIN;
 
     s_log_debug("chain: %d, save: %d, extract: %d",
-        flags & ARG_FLAG_CHAIN,
-        flags & ARG_FLAG_SAVE_HDR,
-        flags & ARG_FLAG_EXTRACT_PART
+        (flags & ARG_FLAG_CHAIN) || 0,
+        (flags & ARG_FLAG_SAVE_HDR) || 0,
+        (flags & ARG_FLAG_EXTRACT_PART) || 0
     );
 
     u32 index = 0;
 
     union mtk_partition_header hdr = { 0 };
     do {
-        s_log_debug("Processing header no. %u...", index);
+        s_log_verbose("Processing header no. %u...", index);
 
         i32 ret = fread(&hdr.buf_, 1, MTK_PART_HEADER_SIZE, fp);
         if (ret != MTK_PART_HEADER_SIZE && ferror(fp)) {
@@ -72,16 +72,6 @@ void mtkpart_dump_file(FILE *fp, u32 flags)
             s_log_error("Invalid magic: 0x%.8x (expected: 0x%.8x)",
                 hdr.data.magic, MTK_PART_MAGIC);
             return;
-        }
-
-        if (hdr.data.ext.magic != MTK_PART_EXT_MAGIC) {
-            s_log_verbose("ext magic mismatch: 0x%.8x (expected 0x%.8x); "
-                "terminating chain uncoditionally",
-                hdr.data.ext.magic, MTK_PART_EXT_MAGIC);
-            chain = false;
-        } else if (hdr.data.ext.is_image_list_end) {
-            s_log_debug("End of chain reached");
-            chain = false;
         }
 
         print_part_header(&hdr.data, index);
@@ -120,6 +110,16 @@ void mtkpart_dump_file(FILE *fp, u32 flags)
                 "Terminating chain uncoditionally!",
                 full_part_size, strerror(errno)
             );
+            chain = false;
+        }
+
+        if (chain && hdr.data.ext.magic != MTK_PART_EXT_MAGIC) {
+            s_log_verbose("ext magic mismatch: 0x%.8x (expected 0x%.8x); "
+                "terminating chain uncoditionally",
+                hdr.data.ext.magic, MTK_PART_EXT_MAGIC);
+            chain = false;
+        } else if (chain && hdr.data.ext.is_image_list_end) {
+            s_log_verbose("End of chain reached");
             chain = false;
         }
 
@@ -294,7 +294,7 @@ static i32 do_save_header(union mtk_partition_header *hdr, u32 index)
 
     out_path_str =
         get_out_filename_from_part_name(hdr->data.part_name, true, index);
-    s_log_debug("Saving partition header to file \"%s\"...", out_path_str);
+    s_log_verbose("Saving partition header to file \"%s\"...", out_path_str);
 
     out_fp = fopen(out_path_str, "wb");
     if (out_fp == NULL) {
@@ -338,7 +338,7 @@ static i32 do_extract_part(FILE *in_fp, size_t n_bytes, const char *out_path)
     FILE *out_fp = NULL;
     u8 *buf = NULL;
 
-    s_log_debug("Extracting partition content to file \"%s\"...", out_path);
+    s_log_verbose("Extracting partition content to file \"%s\"...", out_path);
 
     out_fp = fopen(out_path, "wb");
     if (out_fp == NULL) {
