@@ -21,7 +21,7 @@ DEPFLAGS ?= -MMD -MP
 
 LDFLAGS ?= -pie
 ifeq ($(PLATFORM), windows)
-LDFLAGS += -municode -mwindows
+LDFLAGS += -mconsole
 endif
 SO_LDFLAGS := -shared
 ifeq ($(PLATFORM), linux)

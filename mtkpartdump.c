@@ -1,40 +1,70 @@
 #include "mtkpartdump.h"
 #include "mtkparthdr.h"
+#include "arg.h"
 #include <core/log.h>
 #include <core/util.h>
+#include <core/math.h>
+#include <assert.h>
 #include <stdio.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
 
 #define MODULE_NAME "mtkpartdump"
 
-static void dump_part_header(struct mtk_partition_header_data *hdr);
-static void dump_ext_part_header(struct mtk_part_header_extension *ext);
+static_assert(MTK_PART_NAME_LEN == 32,
+    "This code expects MTK_PART_NAME_LEN to be 32");
 
-static u32 get_aligned_part_size(struct mtk_partition_header_data *hdr);
-static u64 get_full_part_size(struct mtk_partition_header_data *hdr);
-static u64 get_full_aligned_part_size(struct mtk_partition_header_data *hdr);
-static void * get_full_memory_address(struct mtk_partition_header_data *hdr);
+static void print_part_header(const struct mtk_partition_header_data *hdr,
+    u32 hdr_index);
+static void print_ext_part_header(const struct mtk_part_header_extension *ext);
+
+static i32 do_save_header(union mtk_partition_header *hdr, u32 hdr_index);
+static i32 do_extract_part(FILE *in_fp, size_t n_bytes, const char *out_path);
+
+static u32 get_aligned_part_size(const struct mtk_partition_header_data *hdr);
+static u64 get_full_part_size(const struct mtk_partition_header_data *hdr);
+static u64 get_full_aligned_part_size(
+    const struct mtk_partition_header_data *hdr
+);
+static void * get_full_memory_address(
+    const struct mtk_partition_header_data *hdr
+);
 static const char *get_img_type_string(u32 img_type);
 
-void mtkpart_dump_file(FILE *fp, bool chain)
+static char * get_out_filename_from_part_name(
+    const char part_name[MTK_PART_NAME_LEN],
+    bool is_header, u32 index
+);
+
+void mtkpart_dump_file(FILE *fp, u32 flags)
 {
+    bool chain = flags & ARG_FLAG_CHAIN;
+
+    s_log_debug("chain: %d, save: %d, extract: %d",
+        flags & ARG_FLAG_CHAIN,
+        flags & ARG_FLAG_SAVE_HDR,
+        flags & ARG_FLAG_EXTRACT_PART
+    );
+
+    u32 index = 0;
+
     union mtk_partition_header hdr = { 0 };
     do {
-        i32 ret = fread(&hdr.buf_, MTK_PART_HEADER_SIZE, 1, fp);
-        if (ret == -1 && ferror(fp)) {
+        s_log_debug("Processing header no. %u...", index);
+
+        i32 ret = fread(&hdr.buf_, 1, MTK_PART_HEADER_SIZE, fp);
+        if (ret != MTK_PART_HEADER_SIZE && ferror(fp)) {
             s_log_error("Failed to fread() the header intro: %s",
                 strerror(errno));
             return;
-        } else if (ret == -1 && feof(fp)) {
+        } else if (ret != MTK_PART_HEADER_SIZE && feof(fp)) {
             s_log_error("File is too small (end of file reached)");
             return;
-        } else if (ret != 1) {
-            s_log_error("Read an incorrect number of bytes from \"%s\" "
-                "(read: %#x, expected: %#x)",
-                ret * MTK_PART_HEADER_SIZE, MTK_PART_HEADER_SIZE
-            );
+        } else if (ret != MTK_PART_HEADER_SIZE) {
+            s_log_error("Read an incorrect number of bytes from the input file "
+                "(read: %#x, expected: %#x)", ret, MTK_PART_HEADER_SIZE);
             return;
         }
 
@@ -54,19 +84,46 @@ void mtkpart_dump_file(FILE *fp, bool chain)
             chain = false;
         }
 
-        const u64 full_part_size = get_full_aligned_part_size(&hdr.data);
-        if (chain) {
-            if (fseek(fp, full_part_size, SEEK_CUR)) {
-                s_log_error("Failed to seek to the next header in the chain "
-                    "(%llu bytes forward): %s. "
-                    "Terminating chain uncoditionally!",
-                    full_part_size, strerror(errno)
-                );
-                chain = false;
+        print_part_header(&hdr.data, index);
+
+        if (flags & ARG_FLAG_SAVE_HDR) {
+            if (do_save_header(&hdr, index)) {
+                s_log_error("Failed to save the partition header!");
+                /* A failure here doesn't really impact anything
+                 * further down the line */
             }
         }
 
-        dump_part_header(&hdr.data);
+        const u64 full_part_size = get_full_aligned_part_size(&hdr.data);
+        if (flags & ARG_FLAG_EXTRACT_PART) {
+
+            char *out_path = get_out_filename_from_part_name(
+                hdr.data.part_name, false, index
+            );
+
+            i32 ret = do_extract_part(fp, full_part_size, out_path);
+
+            u_nfree(&out_path);
+
+            if (ret) {
+                s_log_error("Failed to extract the partition contents "
+                    "from \"%.32s\". Terminating chain uncoditionally!",
+                    hdr.data.part_name);
+                chain = false;
+            }
+
+        /* If we aren't extracting the content of the partition,
+         * just advance past it */
+        } else if (chain && fseek(fp, full_part_size, SEEK_CUR)) {
+            s_log_error("Failed to seek to the next header in the chain "
+                "(%llu bytes forward): %s. "
+                "Terminating chain uncoditionally!",
+                full_part_size, strerror(errno)
+            );
+            chain = false;
+        }
+
+        index++;
     } while (chain);
 }
 
@@ -78,18 +135,18 @@ void mtkpart_dump_file(FILE *fp, bool chain)
         (u8)((magic & 0xFF000000) >> 24)                            \
     )
 
-static void dump_part_header(struct mtk_partition_header_data *hdr)
+static void print_part_header(const struct mtk_partition_header_data *hdr,
+    u32 hdr_index)
 {
     const char *old_line_verbose = NULL, *old_line_info = NULL;
     s_configure_log_line(S_LOG_VERBOSE, "%s\n", &old_line_verbose);
     s_configure_log_line(S_LOG_INFO, "%s\n", &old_line_info);
 
-    static atomic_int hdr_name_counter = ATOMIC_VAR_INIT(0);
+    char *hdr_name =
+        get_out_filename_from_part_name(hdr->part_name, true, hdr_index);
 
     s_log_verbose("===== Begin Mediatek partition header dump =====");
-    s_log_info("union mtk_partition_header hdr_%.32s__0x%x = {",
-        hdr->part_name, atomic_fetch_add(&hdr_name_counter, 1)
-    );
+    s_log_info("union mtk_partition_header %s = {", hdr_name);
     s_log_info("    .data = {");
     log_magic ("        .magic = ", hdr->magic);
     s_log_info("        .part_size = %#x, "
@@ -104,17 +161,19 @@ static void dump_part_header(struct mtk_partition_header_data *hdr)
         hdr->memory_address, get_full_memory_address(hdr));
     s_log_info("        .memory_address_mode = %#x,", hdr->memory_address_mode);
     s_log_info("        .ext = {");
-    dump_ext_part_header(&hdr->ext);
+    print_ext_part_header(&hdr->ext);
     s_log_info("        }");
     s_log_info("    }");
     s_log_info("};");
     s_log_verbose("=====  End Mediatek partition header dump  =====");
 
+    u_nfree(&hdr_name);
+
     s_configure_log_line(S_LOG_VERBOSE, old_line_verbose, NULL);
     s_configure_log_line(S_LOG_INFO, old_line_info, NULL);
 }
 
-static void dump_ext_part_header(struct mtk_part_header_extension *ext)
+static void print_ext_part_header(const struct mtk_part_header_extension *ext)
 {
     const char *old_line_verbose = NULL, *old_line_info = NULL;
     s_configure_log_line(S_LOG_VERBOSE, "%s\n", &old_line_verbose);
@@ -143,7 +202,7 @@ static void dump_ext_part_header(struct mtk_part_header_extension *ext)
     s_configure_log_line(S_LOG_INFO, old_line_info, NULL);
 }
 
-static u32 get_aligned_part_size(struct mtk_partition_header_data *hdr)
+static u32 get_aligned_part_size(const struct mtk_partition_header_data *hdr)
 {
     if (hdr->ext.magic == MTK_PART_EXT_MAGIC &&
         hdr->ext.size_alignment_bytes != 0)
@@ -157,7 +216,7 @@ static u32 get_aligned_part_size(struct mtk_partition_header_data *hdr)
     }
 }
 
-static u64 get_full_part_size(struct mtk_partition_header_data *hdr)
+static u64 get_full_part_size(const struct mtk_partition_header_data *hdr)
 {
     if (hdr->ext.magic == MTK_PART_EXT_MAGIC) {
         const u64 high = (u64)hdr->ext.part_size_hi << 32;
@@ -167,7 +226,9 @@ static u64 get_full_part_size(struct mtk_partition_header_data *hdr)
     }
 }
 
-static u64 get_full_aligned_part_size(struct mtk_partition_header_data *hdr)
+static u64 get_full_aligned_part_size(
+    const struct mtk_partition_header_data *hdr
+)
 {
     const u32 low = get_aligned_part_size(hdr);
     const u64 high = get_full_part_size(hdr) & 0xFFFFFFFF00000000ULL;
@@ -175,7 +236,9 @@ static u64 get_full_aligned_part_size(struct mtk_partition_header_data *hdr)
     return high | low;
 }
 
-static void * get_full_memory_address(struct mtk_partition_header_data *hdr)
+static void * get_full_memory_address(
+    const struct mtk_partition_header_data *hdr
+)
 {
     if (hdr->ext.magic == MTK_PART_EXT_MAGIC) {
         const u64 high = (u64)hdr->ext.memory_address_hi << 32;
@@ -197,4 +260,146 @@ static const char *get_img_type_string(u32 img_type)
         default:
             return "N/A";
     }
+}
+
+static char * get_out_filename_from_part_name(
+    const char part_name[MTK_PART_NAME_LEN],
+    bool is_header, u32 index
+)
+{
+    i32 size = snprintf(NULL, 0, "%.32s.%s_0x%x.bin",
+        part_name,
+        is_header ? "header" : "extracted",
+        index
+    );
+    s_assert(size >= 0, "snprintf failed!");
+
+    char *buf = malloc(size + 1 /* For the '\0' terminator */);
+    s_assert(buf != NULL, "malloc failed for new filename buffer");
+
+    i32 ret = snprintf(buf, size + 1, "%.32s.%s_0x%x.bin",
+        part_name,
+        is_header ? "header" : "extracted",
+        index
+    );
+    s_assert(ret == size, "snprintf failed (ret: %d, expected: %d)", ret, size);
+
+    return buf;
+}
+
+static i32 do_save_header(union mtk_partition_header *hdr, u32 index)
+{
+    char *out_path_str = NULL;
+    FILE *out_fp = NULL;
+
+    out_path_str =
+        get_out_filename_from_part_name(hdr->data.part_name, true, index);
+    s_log_debug("Saving partition header to file \"%s\"...", out_path_str);
+
+    out_fp = fopen(out_path_str, "wb");
+    if (out_fp == NULL) {
+        goto_error("Failed to open file \"%s\" for writing: %s",
+            out_path_str, strerror(errno));
+    }
+
+    i32 ret = fwrite(hdr, sizeof(union mtk_partition_header), 1, out_fp);
+    if (ret != 1) {
+        goto_error("Failed to write the partiton header to file \"%s\": %s",
+            out_path_str, strerror(errno));
+    }
+
+    if (fclose(out_fp)) {
+        out_fp = NULL;
+        goto_error("Failed to close the output file \"%s\": %s",
+            out_path_str, strerror(errno));
+    }
+    out_fp = NULL;
+
+    u_nfree(&out_path_str);
+
+    return 0;
+
+err:
+    if (out_fp != NULL) {
+        if (fclose(out_fp)) {
+            s_log_error("Failed to close the output file \"%s\": %s",
+                (out_path_str ? out_path_str : "<n/a>"), strerror(errno));
+        }
+        out_fp = NULL;
+    }
+    if (out_path_str != NULL)
+        u_nfree(&out_path_str);
+
+    return 1;
+}
+
+static i32 do_extract_part(FILE *in_fp, size_t n_bytes, const char *out_path)
+{
+    FILE *out_fp = NULL;
+    u8 *buf = NULL;
+
+    s_log_debug("Extracting partition content to file \"%s\"...", out_path);
+
+    out_fp = fopen(out_path, "wb");
+    if (out_fp == NULL) {
+        goto_error("Failed to open output file \"%s\": %s. ",
+            out_path, strerror(errno));
+    }
+
+    /* Copy the contents in 1MB blocks to reduce syscall overhead.
+     * The OS should handle further buffering (e.g. down to disk block size)
+     * by itself. */
+#define BLOCK_BUF_SIZE (1024 * 1024)
+
+    /* We might not need the full 1MB if the partition is small enough */
+    const size_t buf_size = u_min(BLOCK_BUF_SIZE, n_bytes);
+
+    buf = malloc(buf_size);
+    if (buf == NULL) {
+        goto_error("Failed to allocate %llu bytes for the copy buffer",
+            buf_size);
+    }
+
+    size_t n_bytes_left = n_bytes;
+    while (n_bytes_left > 0) {
+        const size_t chunk = u_min(buf_size, n_bytes_left);
+
+        size_t n_read = fread(buf, 1, chunk, in_fp);
+        if (n_read != chunk) {
+            if (feof(in_fp)) {
+                goto_error("Input file doesn't contain the full partition "
+                    "content (unexpected end of file while reading)!");
+            } else if (ferror(in_fp)) {
+                goto_error("Unexpected error while reading from input file: %s",
+                    strerror(errno));
+            }
+        }
+
+        size_t n_written = fwrite(buf, 1, chunk, out_fp);
+        if (n_written != chunk)
+            goto_error("Failed to write to output file: %s", strerror(errno));
+
+        n_bytes_left -= chunk;
+    }
+
+    if (fclose(out_fp)) {
+        out_fp = NULL;
+        goto_error("Failed to close the output file \"%s\": %s",
+            out_path, strerror(errno));
+    }
+    out_fp = NULL;
+
+    return 0;
+
+err:
+    if (buf != NULL) {
+        u_nfree(&buf);
+    }
+    if (out_fp != NULL) {
+        if (fclose(out_fp))
+            s_log_error("Failed to close the output file \"%s\": %s",
+                out_path, strerror(errno));
+        out_fp = NULL;
+    }
+    return 1;
 }
