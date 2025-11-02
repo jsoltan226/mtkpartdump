@@ -398,6 +398,8 @@ static i32 do_extract_part(FILE *in_fp, size_t n_bytes, const char *out_path)
         n_bytes_left -= chunk;
     }
 
+    u_nfree(&buf);
+
     if (fclose(out_fp)) {
         out_fp = NULL;
         goto_error("Failed to close the output file \"%s\": %s",
