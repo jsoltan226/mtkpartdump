@@ -116,6 +116,7 @@ For other build-time configuration options, see the `Makefile`.
 ## Usage
 
 `mtkpartdump [OPTIONS...] <FILE1> [FILE2 FILE3 ...]`
+
 Inspect and extract MediaTek logical partitions from firmware blobs.
 
 Available options:
