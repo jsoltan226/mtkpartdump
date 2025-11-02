@@ -12,6 +12,7 @@
 
 static i32 setup_log(void);
 static void print_usage(void);
+static void print_version(void);
 
 i32 main(i32 argc, char **argv)
 {
@@ -28,10 +29,23 @@ i32 main(i32 argc, char **argv)
     if (arg_parse(argc, argv, &file_paths, &flags)) {
         print_usage();
         goto err;
-    } else if (flags & ARG_FLAG_HELP) {
-        print_usage();
-        goto cleanup;
     }
+
+    const bool exit_early =
+        (flags & ARG_FLAG_HELP) || (flags & ARG_FLAG_VERSION);
+
+    if (flags & ARG_FLAG_VERSION) print_version();
+    if (flags & ARG_FLAG_HELP) print_usage();
+
+    if (exit_early) {
+        goto cleanup;
+    } else if (!exit_early && vector_size(file_paths) == 0) {
+        s_log_error("No files were specified");
+        goto err;
+    }
+
+    if (flags & ARG_FLAG_VERBOSE)
+        s_configure_log_level(S_LOG_DEBUG);
 
     for (u32 i = 0; i < vector_size(file_paths); i++) {
         const char *path = file_paths[i];
@@ -46,8 +60,10 @@ i32 main(i32 argc, char **argv)
         mtkpart_dump_file(fp, flags);
 
         s_log_verbose("Done processing \"%s\"", path);
-        if (fclose(fp))
+        if (fclose(fp)) {
             s_log_error("Failed to close \"%s\": %s", path, strerror(errno));
+            goto err;
+        }
     }
 
 cleanup:
@@ -81,7 +97,7 @@ static i32 setup_log(void) {
         return 1;
     }
 
-    s_configure_log_level(S_LOG_TRACE);
+    s_configure_log_level(S_LOG_INFO);
 
     return 0;
 }
@@ -96,4 +112,12 @@ static void print_usage(void)
     s_log_info("%s", arg_get_help_options_string());
 
     s_configure_log_line(S_LOG_INFO, old_line, NULL);
+}
+
+static void print_version(void)
+{
+    s_log_info("mtkpartdump v1.0 (Mediatek partition header dump tool)");
+    s_log_info("Copyright (C) 2025, Jan Sołtan <jsoltan226@gmail.com>");
+    s_log_info("License GPLv3+: GNU GPL version 3 or later "
+        "<https://gnu.org/licenses/gpl.html>");
 }

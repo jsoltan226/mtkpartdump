@@ -89,9 +89,6 @@ i32 arg_parse(i32 argc, char **argv,
             goto_error("Unknown option \"%s\"", argv[i]);
     }
 
-    if ((!(*o_flags & ARG_FLAG_HELP) && vector_size(*o_file_paths) == 0))
-        goto_error("No files were specified");
-
     return 0;
 
 err:

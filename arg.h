@@ -6,6 +6,8 @@
 
 #define ARG_OPTIONS_LIST                                                       \
     X_(HELP, h, "help", "Show this message and exit")                          \
+    X_(VERSION, V, "version", "Print the program version and exit")            \
+    X_(VERBOSE, v, "verbose", "Enable verbose logging")                        \
     X_(CHAIN, c, "chain", "Process all headers found in a header chain")       \
     X_(SAVE_HDR, s, "save-headers", "Save binary header contents to disk")     \
     X_(EXTRACT_PART, e, "extract-parts", "Extract binary partition contents")  \
